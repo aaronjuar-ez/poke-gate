@@ -481,6 +481,7 @@ struct AgentDetailView: View {
     @ObservedObject var viewModel: AgentsViewModel
     let agent: AgentFile
     @State private var intervalInput: String = ""
+    @State private var showOutput: Bool = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -508,6 +509,7 @@ struct AgentDetailView: View {
                 }
 
                 Button {
+                    showOutput = true
                     viewModel.runAgent(agent)
                 } label: {
                     Label(viewModel.isRunning ? "Running…" : "Run", systemImage: "play.fill")
@@ -563,16 +565,109 @@ struct AgentDetailView: View {
 
             Divider()
 
-            HighlightedCodeEditor(
-                text: $viewModel.editorContent,
-                language: viewModel.showingEnv ? "env" : "javascript"
-            )
+            if showOutput {
+                VSplitView {
+                    HighlightedCodeEditor(
+                        text: $viewModel.editorContent,
+                        language: viewModel.showingEnv ? "env" : "javascript"
+                    )
+                    .frame(minHeight: 100)
+
+                    AgentOutputPanel(
+                        output: viewModel.lastRunOutput,
+                        isRunning: viewModel.isRunning,
+                        onClear: {
+                            viewModel.lastRunOutput = ""
+                            showOutput = false
+                        }
+                    )
+                    .frame(minHeight: 80, idealHeight: 180)
+                }
+            } else {
+                HighlightedCodeEditor(
+                    text: $viewModel.editorContent,
+                    language: viewModel.showingEnv ? "env" : "javascript"
+                )
+            }
         }
         .onAppear {
             intervalInput = agent.interval
         }
         .onChange(of: agent.id) { _, _ in
             intervalInput = agent.interval
+            showOutput = false
+        }
+    }
+}
+
+struct AgentOutputPanel: View {
+    let output: String
+    let isRunning: Bool
+    let onClear: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                HStack(spacing: 6) {
+                    if isRunning {
+                        ProgressView()
+                            .scaleEffect(0.6)
+                            .frame(width: 12, height: 12)
+                    } else {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.green)
+                    }
+                    Text(isRunning ? "Running…" : "Output")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Button {
+                    let pb = NSPasteboard.general
+                    pb.clearContents()
+                    pb.setString(output, forType: .string)
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(.caption)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Copy output")
+
+                Button(action: onClear) {
+                    Image(systemName: "xmark")
+                        .font(.caption)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Close output panel")
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(.quaternary.opacity(0.3))
+
+            Divider()
+
+            ScrollViewReader { proxy in
+                ScrollView {
+                    Text(output.isEmpty ? (isRunning ? "Starting…" : "No output.") : output)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(output.isEmpty ? .tertiary : .primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .id("bottom")
+                }
+                .onChange(of: output) { _, _ in
+                    withAnimation(.easeOut(duration: 0.1)) {
+                        proxy.scrollTo("bottom", anchor: .bottom)
+                    }
+                }
+            }
+            .background(Color(nsColor: .textBackgroundColor))
         }
     }
 }
