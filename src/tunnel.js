@@ -1,4 +1,4 @@
-import { PokeTunnel, getToken } from "poke";
+import { PokeTunnel } from "poke";
 import { loadState, saveState } from "./webhook.js";
 
 function log(msg) {
@@ -6,8 +6,7 @@ function log(msg) {
   console.log(`[${ts}] ${msg}`);
 }
 
-async function cleanupStaleConnections() {
-  const token = getToken();
+async function cleanupStaleConnections(token) {
   if (!token) return;
   const base = process.env.POKE_API ?? "https://poke.com/api/v1";
   const state = loadState();
@@ -35,10 +34,9 @@ async function cleanupStaleConnections() {
   saveState({ webhookUrl, webhookToken });
 }
 
-export async function startTunnel({ mcpUrl, onEvent }) {
-  await cleanupStaleConnections();
+export async function startTunnel({ mcpUrl, token, onEvent }) {
+  await cleanupStaleConnections(token);
 
-  const token = getToken();
   if (!token) {
     throw new Error("No Poke auth token available for tunnel.");
   }

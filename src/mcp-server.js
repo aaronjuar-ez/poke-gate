@@ -847,12 +847,29 @@ function readBody(req) {
   });
 }
 
+function writeMcpEventStream(req, res) {
+  const sessionId = extractSessionId(req);
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "Mcp-Session-Id": sessionId,
+  });
+  res.write(": connected\n\n");
+
+  const keepAlive = setInterval(() => {
+    res.write(": keepalive\n\n");
+  }, 25_000);
+
+  req.on("close", () => clearInterval(keepAlive));
+}
+
 export function startMcpServer(port = 0) {
   return new Promise((resolve, reject) => {
     const httpServer = http.createServer(async (req, res) => {
       res.setHeader("Access-Control-Allow-Origin", "*");
       res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
-      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Mcp-Session-Id, Accept");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Mcp-Session-Id, Accept, X-Poke-User-Id");
       res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id");
 
       if (req.method === "OPTIONS") {
@@ -863,12 +880,27 @@ export function startMcpServer(port = 0) {
 
       const url = new URL(req.url, "http://localhost");
 
+      if (url.pathname === "/mcp" && req.method === "GET") {
+        const accept = req.headers.accept || "";
+        if (accept.includes("text/event-stream")) {
+          writeMcpEventStream(req, res);
+        } else {
+          res.writeHead(405, { "Content-Type": "text/plain", Allow: "POST, OPTIONS" });
+          res.end("MCP endpoint expects POST, or GET with Accept: text/event-stream");
+        }
+        return;
+      }
+
       if (url.pathname === "/mcp" && req.method === "POST") {
         try {
           const body = await readBody(req);
           const parsed = JSON.parse(body);
 
           const sessionId = extractSessionId(req);
+          const responseHeaders = {
+            "Content-Type": "application/json",
+            "Mcp-Session-Id": sessionId,
+          };
 
           if (Array.isArray(parsed)) {
             const results = [];
@@ -878,17 +910,17 @@ export function startMcpServer(port = 0) {
               const resolved = r instanceof Promise ? await r : r;
               if (resolved) results.push(resolved);
             }
-            res.writeHead(200, { "Content-Type": "application/json" });
+            res.writeHead(200, responseHeaders);
             res.end(JSON.stringify(results));
           } else {
             const m = { ...parsed, __context: { sessionId } };
             let result = handleJsonRpc(m);
             if (result instanceof Promise) result = await result;
             if (result) {
-              res.writeHead(200, { "Content-Type": "application/json" });
+              res.writeHead(200, responseHeaders);
               res.end(JSON.stringify(result));
             } else {
-              res.writeHead(204);
+              res.writeHead(204, { "Mcp-Session-Id": sessionId });
               res.end();
             }
           }

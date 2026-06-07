@@ -2,7 +2,7 @@ import { startMcpServer, enableLogging, getPermissionMode } from "./mcp-server.j
 import { startTunnel } from "./tunnel.js";
 import { startAgentScheduler, stopAgentScheduler } from "./agents.js";
 import { sendToWebhook } from "./webhook.js";
-import { isLoggedIn, login, getToken } from "poke";
+import { ensurePokeAuthenticated } from "./poke-auth.js";
 import { execSync } from "node:child_process";
 
 const verbose = process.argv.includes("--verbose") || process.argv.includes("-v");
@@ -12,8 +12,28 @@ function killExistingInstances() {
   const myPid = process.pid;
   const ppid = process.ppid;
   try {
-    const out = execSync("pgrep -f 'node.*poke-gate.*app\\.js'", { encoding: "utf-8" }).trim();
-    const pids = out.split("\n").map(Number).filter((p) => p && p !== myPid && p !== ppid);
+    const out = execSync("ps -axo pid=,ppid=,command=", { encoding: "utf-8" }).trim();
+    const pids = out
+      .split("\n")
+      .map((line) => {
+        const match = line.trim().match(/^(\d+)\s+(\d+)\s+(.+)$/);
+        if (!match) return null;
+        const [, pid, parentPid, command] = match;
+        return { pid: Number(pid), parentPid: Number(parentPid), command };
+      })
+      .filter((processInfo) => {
+        if (!processInfo || processInfo.pid === myPid || processInfo.pid === ppid || processInfo.parentPid === myPid) return false;
+        return (
+          processInfo.command.includes("node ") &&
+          processInfo.command.includes("poke-gate") &&
+          (
+            processInfo.command.includes("app.js") ||
+            processInfo.command.includes(".bin/poke-gate") ||
+            processInfo.command.includes("/bin/poke-gate")
+          )
+        );
+      })
+      .map(({ pid }) => pid);
     for (const pid of pids) {
       try { process.kill(pid, "SIGTERM"); } catch {}
     }
@@ -31,17 +51,7 @@ function sleep(ms) {
 }
 
 async function ensureAuthenticated() {
-  if (!isLoggedIn()) {
-    log("Signing in to Poke...");
-    await login();
-  }
-
-  const token = getToken();
-  if (!token) {
-    throw new Error("Authentication failed: no token returned by Poke SDK.");
-  }
-
-  return token;
+  return ensurePokeAuthenticated({ onLogin: () => log("Signing in to Poke...") });
 }
 
 let currentTunnel = null;
@@ -60,6 +70,7 @@ async function connectWithRetry(mcpUrl, token) {
 
       const { tunnel } = await startTunnel({
         mcpUrl,
+        token,
         onEvent: (type, data) => {
           switch (type) {
             case "connected":

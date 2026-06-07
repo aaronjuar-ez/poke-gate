@@ -1,7 +1,8 @@
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { Poke, getToken } from "poke";
+import { Poke } from "poke";
+import { getPokeAuthToken } from "./poke-auth.js";
 
 const CONFIG_DIR = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
 const STATE_PATH = join(CONFIG_DIR, "poke-gate", "state.json");
@@ -25,10 +26,10 @@ export async function getWebhook() {
     return { webhookUrl: state.webhookUrl, webhookToken: state.webhookToken };
   }
 
-  const token = getToken();
+  const token = getPokeAuthToken();
   if (!token) throw new Error("No Poke auth token available.");
 
-  const poke = new Poke({ token });
+  const poke = new Poke({ apiKey: token });
   const result = await poke.createWebhook({ condition: "poke-gate", action: "poke-gate" });
 
   const webhook = { webhookUrl: result.webhookUrl, webhookToken: result.webhookToken };
@@ -38,6 +39,9 @@ export async function getWebhook() {
 
 export async function sendToWebhook(message) {
   const { webhookUrl, webhookToken } = await getWebhook();
-  const poke = new Poke({ token: getToken() });
+  const token = getPokeAuthToken();
+  if (!token) throw new Error("No Poke auth token available.");
+
+  const poke = new Poke({ apiKey: token });
   return poke.sendWebhook({ webhookUrl, webhookToken, data: { message } });
 }

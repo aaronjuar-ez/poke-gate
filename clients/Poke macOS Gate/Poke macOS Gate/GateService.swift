@@ -507,13 +507,17 @@ class GateService: ObservableObject {
 
         proc.executableURL = URL(fileURLWithPath: "/bin/zsh")
         proc.arguments = ["-c", "\(npxBin) -y poke-gate@latest --verbose"]
-        proc.environment = ProcessInfo.processInfo.environment.merging(
+        var environment = ProcessInfo.processInfo.environment.merging(
             [
                 "PATH": fullPath,
                 "POKE_GATE_PERMISSION_MODE": permissionMode.rawValue,
             ],
             uniquingKeysWith: { _, new in new }
         )
+        if let token = resolveToken() {
+            environment["POKE_API_KEY"] = token
+        }
+        proc.environment = environment
         proc.standardOutput = pipe
         proc.standardError = pipe
         proc.currentDirectoryURL = FileManager.default.homeDirectoryForCurrentUser
@@ -556,7 +560,7 @@ class GateService: ObservableObject {
     private func killOrphanedProcesses() {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-        task.arguments = ["-f", "node.*poke-gate.*app\\.js"]
+        task.arguments = ["-f", "node .*((poke-gate.*app\\.js)|(\\.bin/poke-gate))"]
         try? task.run()
         task.waitUntilExit()
     }
